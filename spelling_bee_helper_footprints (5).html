@@ -1,0 +1,2738 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spelling Bee Helper - Footprints</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'media',
+        theme: {
+          extend: {
+            keyframes: {
+              shake: {
+                '0%, 100%': { transform: 'translateX(0)' },
+                '10%, 30%, 50%, 70%, 90%': { transform: 'translateX(-10px)' },
+                '20%, 40%, 60%, 80%': { transform: 'translateX(10px)' },
+              },
+            },
+            animation: {
+              shake: 'shake 0.5s ease-in-out',
+            },
+          },
+        },
+      }
+    </script>
+    <!-- 3rd Party Libraries for File Parsing & Audio ZIP -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- React, ReactDOM and Babel Standalone for browser execution -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script>
+      if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    </script>
+    <!-- Bubble Font from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bubblegum+Sans&family=Cinzel:wght@600;800;900&family=Great+Vibes&family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      @font-face {
+        font-family: 'Kiddy Bubble';
+        src: local('Kiddy Bubble'), local('KiddyBubble'), url('https://fonts.cdnfonts.com/s/72985/KiddyBubble.woff') format('woff');
+        font-display: swap;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        overflow-x: hidden;
+      }
+      img {
+        image-rendering: -webkit-optimize-contrast;
+        image-rendering: crisp-edges;
+        image-rendering: high-quality;
+        -webkit-backface-visibility: hidden;
+        backface-visibility: hidden;
+      }
+      .font-bubble {
+        font-family: 'Kiddy Bubble', 'Bubblegum Sans', cursive, system-ui, sans-serif;
+      }
+      .font-diploma-serif {
+        font-family: 'Cinzel', serif, Georgia;
+      }
+      .font-signature {
+        font-family: 'Great Vibes', cursive;
+      }
+      .font-sans-cert {
+        font-family: 'Montserrat', system-ui, sans-serif;
+      }
+      @media print {
+        body * {
+          visibility: hidden;
+        }
+        #diploma-printable-container, #diploma-printable-container * {
+          visibility: visible;
+        }
+        #diploma-printable-container {
+          position: fixed;
+          left: 0;
+          top: 0;
+          width: 100vw;
+          height: 100vh;
+          margin: 0;
+          padding: 1.5cm;
+          box-shadow: none !important;
+          border: none !important;
+          background: white !important;
+          z-index: 99999;
+        }
+        .no-print {
+          display: none !important;
+        }
+      }
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.05);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(100, 100, 100, 0.3);
+        border-radius: 4px;
+      }
+      @keyframes beeFlight {
+        0% { left: 8%; top: 70%; transform: scaleX(1) rotate(-8deg); }
+        25% { left: 75%; top: 20%; transform: scaleX(1) rotate(14deg); }
+        48% { left: 82%; top: 60%; transform: scaleX(4deg); }
+        50% { left: 82%; top: 60%; transform: scaleX(-1) rotate(0deg); }
+        75% { left: 20%; top: 18%; transform: scaleX(-1) rotate(-12deg); }
+        98% { left: 8%; top: 70%; transform: scaleX(8deg); }
+        100% { left: 8%; top: 70%; transform: scaleX(1) rotate(-8deg); }
+      }
+      .bee-flying-screen {
+        position: fixed;
+        animation: beeFlight 13s infinite ease-in-out;
+        z-index: 60;
+        pointer-events: auto;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+      const WordStatus = {
+        PENDING: 0,
+        PROCESSING: 1,
+        COMPLETED: 2,
+        FAILED: 3,
+      };
+
+      let uniqueCounter = 0;
+      const generateUniqueId = (prefix = 'id') =>
+        `${prefix}-${Date.now()}-${++uniqueCounter}-${Math.random().toString(36).substring(2, 9)}`;
+
+      const COMMON_IPA = {
+        ant: '/ænt/',
+        bat: '/bæt/',
+        cat: '/kæt/',
+        dolphin: '/ˈdɑːl.fɪn/',
+        elephant: '/ˈel.ə.fənt/',
+        frog: '/frɑːɡ/',
+        giraffe: '/dʒɪˈræf/',
+        hat: '/hæt/',
+        'ice-cream': '/ˌaɪs ˈkriːm/',
+        'ice cream': '/ˌaɪs ˈkriːm/',
+        jellyfish: '/ˈdʒel.i.fɪʃ/',
+        kite: '/kaɪt/',
+        lamp: '/læmp/',
+        magnet: '/ˈmæɡ.nət/',
+        notebook: '/ˈnoʊt.bʊk/',
+        owl: '/aʊl/',
+        parrot: '/ˈper.ət/',
+        queen: '/kwiːn/',
+        rainbow: '/ˈreɪn.boʊ/',
+        sun: '/sʌn/',
+        umbrella: '/ʌmˈbrel.ə/',
+        whale: '/weɪl/',
+        xylophone: '/ˈzaɪ.lə.foʊn/',
+        'yo-yo': '/ˈjoʊ.joʊ/',
+        yoyo: '/ˈjoʊ.joʊ/',
+        zebra: '/ˈziː.brə/',
+        triangle: '/ˈtraɪ.æŋ.ɡəl/',
+        square: '/skwer/',
+        circle: '/ˈsɜːr.kəl/',
+        rectangle: '/ˈrek.tæŋ.ɡəl/',
+        yellow: '/ˈjel.oʊ/',
+        red: '/red/',
+        green: '/ɡriːn/',
+        blue: '/bluː/',
+        purple: '/ˈpɜːr.pəl/',
+        pink: '/pɪŋk/',
+        duck: '/dʌk/',
+        rabbit: '/ˈræb.ɪt/',
+        pig: '/pɪɡ/',
+        dog: '/dɔːɡ/',
+        cow: '/kaʊ/',
+        horse: '/hɔːrs/',
+        apple: '/ˈæp.əl/',
+        banana: '/bəˈnæn.ə/',
+        orange: '/ˈɔːr.ɪndʒ/',
+        strawberry: '/ˈstrɔːˌber.i/',
+        watermelon: '/ˈwɑː.t̬ɚˌmel.ən/',
+        head: '/hed/',
+        eye: '/aɪ/',
+        nose: '/noʊz/',
+        finger: '/ˈfɪŋ.ɡɚ/',
+        ear: '/ɪr/',
+        leg: '/leɡ/',
+        arm: '/ɑːrm/',
+        tongue: '/tʌŋ/',
+        'big small': '/bɪɡ smɔːl/',
+        'clean dirty': '/kliːn ˈdɜːr.t̬i/',
+        'happy sad': '/ˈhæp.i sæd/',
+        'hot cold': '/hɑːt koʊld/',
+        'slow fast': '/sloʊ fæst/',
+        'tall short': '/tɔːl ʃɔːrt/'
+      };
+
+      const COMMON_SENTENCES = {
+        ant: 'The tiny ant carried food back to the colony.',
+        bat: 'A nocturnal bat swooped gently through the night sky.',
+        cat: 'The fluffy cat purred softly in the sunshine.',
+        dolphin: 'The friendly dolphin leaped high above the waves.',
+        elephant: 'An elephant uses its long trunk to drink water.',
+        frog: 'The green frog hopped gracefully into the pond.',
+        giraffe: 'The tall giraffe reached the green leaves on the high branches.',
+        hat: 'He wore a stylish sun hat to stay cool outside.',
+        'ice-cream': 'Eating cold ice cream on a warm day is delicious.',
+        'ice cream': 'Eating cold ice cream on a warm day is delicious.',
+        jellyfish: 'The glowing jellyfish swam peacefully in the ocean.',
+        kite: 'A colorful kite soared high up in the windy sky.',
+        lamp: 'She turned on the reading lamp beside her bed.',
+        magnet: 'The magnet attracted the metal paperclips instantly.',
+        notebook: 'He wrote the spelling words neatly in his notebook.',
+        owl: 'A wise old owl watched quietly from the tree branch.',
+        parrot: 'The bright parrot chirped cheerful tunes in the forest.',
+        queen: 'The graceful queen smiled from her royal throne.',
+        rainbow: 'A brilliant rainbow appeared after the afternoon rain.',
+        sun: 'The bright sun warmed the earth with morning light.',
+        umbrella: 'Open your umbrella when rain begins to fall.',
+        whale: 'The majestic whale swam through the deep blue ocean.',
+        xylophone: 'She played a joyful song on the wooden xylophone.',
+        'yo-yo': 'The red yo-yo spun up and down on its string.',
+        yoyo: 'The red yo-yo spun up and down on its string.',
+        zebra: 'The wild zebra has striking black and white stripes.',
+        triangle: 'A triangle has three straight sides and three corners.',
+        square: 'A square has four equal sides and four right angles.',
+        circle: 'A circle is a round shape with no corners.',
+        rectangle: 'A rectangle has four sides with opposite sides equal.',
+        yellow: 'The bright yellow sun brings warmth to the day.',
+        red: 'She picked a ripe red strawberry from the garden.',
+        green: 'The grass in the meadow is vibrant and green.',
+        blue: 'The ocean waves are a deep and beautiful blue.',
+        purple: 'Grapes turn sweet and purple when ripe.',
+        pink: 'The delicate flamingo is famous for its pink feathers.',
+        duck: 'The yellow duck swam cheerfully across the pond.',
+        rabbit: 'The fluffy rabbit hopped through the green meadow.',
+        pig: 'The friendly pig enjoyed playing in the farmyard.',
+        dog: 'The playful dog wagged its tail happily.',
+        cow: 'The gentle cow grazed peacefully in the pasture.',
+        horse: 'The brown horse galloped across the open fields.',
+        apple: 'He took a crunchy bite of the sweet red apple.',
+        banana: 'She peeled a yellow banana for a healthy snack.',
+        orange: 'Fresh orange juice is full of healthy vitamins.',
+        strawberry: 'The red strawberry tastes sweet and delicious.',
+        watermelon: 'Juicy watermelon is perfect for a hot summer day.',
+        head: 'Nod your head to say yes.',
+        eye: 'She blinked her eye and smiled warmly.',
+        nose: 'Use your nose to smell the fragrant flowers.',
+        finger: 'He pointed his finger toward the bright stars.',
+        ear: 'We listen to sweet music with our ears.',
+        leg: 'She stretched her leg before running the race.',
+        arm: 'He raised his arm high up in the air.',
+        tongue: 'Stick out your tongue to taste the sweet treat.',
+        'big small': 'The elephant is big and the mouse is small.',
+        'clean dirty': 'My shirt is clean and the muddy boots are dirty.',
+        'happy sad': 'She feels happy when smiling, not sad.',
+        'hot cold': 'The soup is hot and the ice cream is cold.',
+        'slow fast': 'The turtle is slow and the cheetah is fast.',
+        'tall short': 'The giraffe is tall and the rabbit is short.'
+      };
+
+      const WORD_EMOJIS = {
+        ant: '🐜',
+        bat: '🦇',
+        cat: '🐱',
+        dolphin: '🐬',
+        elephant: '🐘',
+        frog: '🐸',
+        giraffe: '🦒',
+        hat: '🎩',
+        'ice-cream': '🍦',
+        'ice cream': '🍦',
+        jellyfish: '🪼',
+        kite: '🪁',
+        lamp: '💡',
+        magnet: '🧲',
+        notebook: '📓',
+        owl: '🦉',
+        parrot: '🦜',
+        queen: '👑',
+        rainbow: '🌈',
+        sun: '☀️',
+        umbrella: '☂️',
+        whale: '🐋',
+        xylophone: '🎼',
+        'yo-yo': '🪀',
+        yoyo: '🪀',
+        zebra: '🦓',
+        triangle: '🔺',
+        square: '🟨',
+        circle: '⚪',
+        rectangle: '▭',
+        yellow: '💛',
+        red: '❤️',
+        green: '💚',
+        blue: '💙',
+        purple: '💜',
+        pink: '🩷',
+        duck: '🦆',
+        rabbit: '🐇',
+        pig: '🐷',
+        dog: '🐶',
+        cow: '🐮',
+        horse: '🐴',
+        apple: '🍎',
+        banana: '🍌',
+        orange: '🍊',
+        strawberry: '🍓',
+        watermelon: '🍉',
+        head: '🗣️',
+        eye: '👁️',
+        nose: '👃',
+        finger: '☝️',
+        ear: '👂',
+        leg: '🦵',
+        arm: '💪',
+        tongue: '👅',
+        'big small': '🐘🐭',
+        'clean dirty': '🧼🧦',
+        'happy sad': '😊😢',
+        'hot cold': '🔥❄️',
+        'slow fast': '🐢🐆',
+        'tall short': '🦒🐰'
+      };
+
+      const PROFESSIONAL_WORD_IMAGES = {
+        ant: 'https://i.postimg.cc/VsDWSTmJ/ant.jpg',
+        bat: 'https://i.postimg.cc/66Yf7St2/bat.jpg',
+        cat: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/cat.jpg',
+        dolphin: 'https://i.postimg.cc/8ktmF3N6/dolphin.jpg',
+        elephant: 'https://i.postimg.cc/fWBf3FDY/elephant.jpg',
+        frog: 'https://i.postimg.cc/J40cjqzn/frog.jpg',
+        giraffe: 'https://i.postimg.cc/9F0typQ0/giraffe.jpg',
+        hat: 'https://i.postimg.cc/xT8yLR1c/hat.jpg',
+        'ice-cream': 'https://i.postimg.cc/NfF7R4jy/ice-cream.jpg',
+        'ice cream': 'https://i.postimg.cc/NfF7R4jy/ice-cream.jpg',
+        jellyfish: 'https://i.postimg.cc/28yFnwSb/jellyfish.jpg',
+        kite: 'https://i.postimg.cc/m2kN7wg1/kite.jpg',
+        lamp: 'https://i.postimg.cc/28yFnwSB/lamp.jpg',
+        magnet: 'https://i.postimg.cc/ncrYqkhq/magnet.jpg',
+        notebook: 'https://i.postimg.cc/7YhMSVZg/notebook.jpg',
+        owl: 'https://i.postimg.cc/PrJz145Q/owl.jpg',
+        parrot: 'https://i.postimg.cc/m2kN7wgw/parrot.jpg',
+        queen: 'https://i.postimg.cc/15XcDH3M/queen.jpg',
+        rainbow: 'https://i.postimg.cc/RVhQwRZX/rainbow.jpg',
+        sun: 'https://i.postimg.cc/3JNC2Bxt/sun.jpg',
+        umbrella: 'https://i.postimg.cc/15XcDH3d/umbrella.jpg',
+        whale: 'https://i.postimg.cc/Wbym8kd7/whale.jpg',
+        xylophone: 'https://i.postimg.cc/ZKQPHdWj/xylophone.jpg',
+        'yo-yo': 'https://i.postimg.cc/GhfPKy4q/yo-yo.jpg',
+        yoyo: 'https://i.postimg.cc/GhfPKy4q/yo-yo.jpg',
+        zebra: 'https://i.postimg.cc/pXSQCFm0/zebra.jpg',
+        triangle: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/triangle.jpg',
+        square: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/square.jpg',
+        circle: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/circle.jpg',
+        rectangle: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/rectangle.jpg',
+        yellow: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/yellow.jpg',
+        red: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/red.jpg',
+        green: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/green.jpg',
+        blue: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/blue.jpg',
+        purple: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/purple.jpg',
+        pink: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/pink.jpg',
+        duck: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/duck.jpg',
+        rabbit: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/rabbit.jpg',
+        pig: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/pig.jpg',
+        dog: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/dog.jpg',
+        cow: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/cow.jpg',
+        horse: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/horse.jpg',
+        apple: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/apple.jpg',
+        banana: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/fb0b900b2491da7bfd9010e9f5b0e4b4c4821b23/banana.jpg',
+        orange: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/fb0b900b2491da7bfd9010e9f5b0e4b4c4821b23/orange.jpg',
+        strawberry: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/strawberry.jpg',
+        watermelon: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/watermelon.jpg',
+        head: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/head.jpg',
+        eye: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/eye.jpg',
+        nose: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/nose.jpg',
+        finger: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/finger.jpg',
+        ear: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/ear.jpg',
+        leg: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/leg.jpg',
+        arm: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/arm.jpg',
+        tongue: 'https://raw.githubusercontent.com/Milko-arch/buhitos-toddlers-vocabulary/83cef38ab83cb9093c1879f71116a211e0c09646/tongue.jpg',
+        'big small': 'https://raw.githubusercontent.com/Milko-arch/opuestos/1b47c6a71c84c07b10c3fae2d8cd6908663a18e4/big%20small.jpg',
+        'clean dirty': 'https://raw.githubusercontent.com/Milko-arch/opuestos/1b47c6a71c84c07b10c3fae2d8cd6908663a18e4/clean%20dirty.jpg',
+        'happy sad': 'https://raw.githubusercontent.com/Milko-arch/opuestos/1b47c6a71c84c07b10c3fae2d8cd6908663a18e4/happy%20sad.jpg',
+        'hot cold': 'https://raw.githubusercontent.com/Milko-arch/opuestos/1b47c6a71c84c07b10c3fae2d8cd6908663a18e4/hot%20cold.jpg',
+        'slow fast': 'https://raw.githubusercontent.com/Milko-arch/opuestos/1b47c6a71c84c07b10c3fae2d8cd6908663a18e4/slow%20fast.jpg',
+        'tall short': 'https://raw.githubusercontent.com/Milko-arch/opuestos/1b47c6a71c84c07b10c3fae2d8cd6908663a18e4/tall%20short.jpg'
+      };
+
+      const DEFAULT_WORDS_LIST = [
+        'ant',
+        'bat',
+        'cat',
+        'dolphin',
+        'elephant',
+        'frog',
+        'giraffe',
+        'hat',
+        'ice-cream',
+        'jellyfish',
+        'kite',
+        'lamp',
+        'magnet',
+        'notebook',
+        'owl',
+        'parrot',
+        'queen',
+        'rainbow',
+        'sun',
+        'umbrella',
+        'whale',
+        'xylophone',
+        'yo-yo',
+        'zebra',
+        'triangle',
+        'square',
+        'circle',
+        'rectangle',
+        'yellow',
+        'red',
+        'green',
+        'blue',
+        'purple',
+        'pink',
+        'duck',
+        'rabbit',
+        'pig',
+        'dog',
+        'cow',
+        'horse',
+        'apple',
+        'banana',
+        'orange',
+        'strawberry',
+        'watermelon',
+        'head',
+        'eye',
+        'nose',
+        'finger',
+        'ear',
+        'leg',
+        'arm',
+        'tongue',
+        'big small',
+        'clean dirty',
+        'happy sad',
+        'hot cold',
+        'slow fast',
+        'tall short'
+      ];
+
+      function createWordSvgIllustration(word) {
+        const cleanWord = (word || '').trim().toLowerCase();
+        if (PROFESSIONAL_WORD_IMAGES[cleanWord]) {
+          return PROFESSIONAL_WORD_IMAGES[cleanWord];
+        }
+        const emoji = WORD_EMOJIS[cleanWord] || '🐝';
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+          <rect width="100%" height="100%" rx="30" fill="#e0e7ff"/>
+          <text x="50%" y="45%" dominant-baseline="central" text-anchor="middle" font-size="90">${emoji}</text>
+          <text x="50%" y="78%" dominant-baseline="central" text-anchor="middle" font-size="28" font-family="sans-serif" font-weight="bold" fill="#4338ca">${cleanWord.toUpperCase()}</text>
+        </svg>`;
+        return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+      }
+
+      const getPhonetic = async (wordText) => {
+        const clean = (wordText || '').trim().toLowerCase();
+        if (COMMON_IPA[clean]) return COMMON_IPA[clean];
+        try {
+          const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(clean)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data[0]) {
+              if (data[0].phonetic) return data[0].phonetic;
+              if (data[0].phonetics && data[0].phonetics.length > 0) {
+                const found = data[0].phonetics.find(p => p.text);
+                if (found) return found.text;
+              }
+            }
+          }
+        } catch (e) {}
+        return `/${clean}/`;
+      };
+
+      const getSentence = async (wordText) => {
+        const clean = (wordText || '').trim().toLowerCase();
+        if (COMMON_SENTENCES[clean]) return COMMON_SENTENCES[clean];
+        return `The word "${wordText}" is fun to spell!`;
+      };
+
+      const getImage = async (wordText) => {
+        const clean = (wordText || '').trim().toLowerCase();
+        if (PROFESSIONAL_WORD_IMAGES[clean]) {
+          return PROFESSIONAL_WORD_IMAGES[clean];
+        }
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          const wikiUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(clean)}&gsrlimit=1&prop=imageinfo&iiprop=url&iiurlwidth=600&format=json&origin=*`;
+          const response = await fetch(wikiUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data && data.query && data.query.pages) {
+              const pages = Object.values(data.query.pages);
+              if (pages.length > 0 && pages[0].imageinfo && pages[0].imageinfo[0]) {
+                const info = pages[0].imageinfo[0];
+                const imgUrl = info.thumburl || info.url;
+                if (imgUrl && !imgUrl.endsWith('.svg') && !imgUrl.endsWith('.pdf')) {
+                  return imgUrl;
+                }
+              }
+            }
+          }
+        } catch (e) {}
+
+        return createWordSvgIllustration(wordText);
+      };
+
+      const pcmToWav = (pcmData, sampleRate = 22050) => {
+        const buffer = new ArrayBuffer(44 + pcmData.length);
+        const view = new DataView(buffer);
+        const writeString = (offset, str) => {
+          for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+        };
+        writeString(0, 'RIFF');
+        view.setUint32(4, 36 + pcmData.length, true);
+        writeString(8, 'WAVE');
+        writeString(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        writeString(36, 'data');
+        view.setUint32(40, pcmData.length, true);
+        new Uint8Array(buffer, 44).set(pcmData);
+        return new Blob([buffer], { type: 'audio/wav' });
+      };
+
+      const downloadZip = async (words, courseName) => {
+        if (typeof JSZip === 'undefined') throw new Error('JSZip not loaded');
+        const zip = new JSZip();
+        let audioCount = 0;
+        for (const word of words) {
+          if (word.status === WordStatus.COMPLETED && word.audioData) {
+            const fileName = `${word.text.toLowerCase().replace(/[^a-z0-9]/gi, '_')}.wav`;
+            zip.file(fileName, word.audioData);
+            audioCount++;
+          }
+        }
+        if (audioCount === 0) throw new Error('No audio files to zip.');
+        const content = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${courseName.toLowerCase().replace(/[^a-z0-9]/gi, '_')}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+
+      const parseDocx = async (file) => {
+        if (typeof mammoth === 'undefined') throw new Error('Mammoth.js not found.');
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        return result.value
+          .split(/\r?\n/)
+          .map(w => w.trim())
+          .filter(w => w && !/\d/.test(w));
+      };
+
+      const parseXlsx = async (file) => {
+        if (typeof XLSX === 'undefined') throw new Error('XLSX.js not found.');
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        return json
+          .flat()
+          .map(cell => (cell ? String(cell).trim() : ''))
+          .filter(cell => cell && !/\d/.test(cell));
+      };
+
+      const parsePdf = async (file) => {
+        if (typeof pdfjsLib === 'undefined') throw new Error('PDF.js not found.');
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const words = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageWords = textContent.items
+            .map(item => ('str' in item ? item.str.trim() : ''))
+            .filter(w => w && !/\d/.test(w));
+          for (const wordText of pageWords) {
+            words.push({
+              id: generateUniqueId(wordText),
+              text: wordText,
+              status: WordStatus.PENDING,
+              phonetic: null,
+              sentence: null,
+              imageUrl: null,
+              audioUrl: null,
+              audioData: null,
+              error: null,
+            });
+          }
+        }
+        return words;
+      };
+
+      const parseZip = async (file, currentWords) => {
+        if (typeof JSZip === 'undefined') throw new Error('JSZip not found.');
+        const zip = new JSZip();
+        const content = await zip.loadAsync(file);
+        const matched = [];
+        const unmatched = [];
+        for (const [filename, zipEntry] of Object.entries(content.files)) {
+          if (!zipEntry.dir && filename.toLowerCase().endsWith('.wav')) {
+            const wordName = filename.replace(/\.[^/.]+$/, '').toLowerCase();
+            const blob = await zipEntry.async('blob');
+            const matchingWord = currentWords.find(w => w.toLowerCase() === wordName);
+            if (matchingWord) {
+              matched.push({ text: matchingWord, audioBlob: blob });
+            } else {
+              unmatched.push(wordName);
+            }
+          }
+        }
+        return { matched, unmatched };
+      };
+
+      const PlayIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      );
+
+      const DownloadIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+      );
+
+      const TrashIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      );
+
+      const RefreshIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      );
+
+      const CheckCircleIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      );
+
+      const XCircleIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      );
+
+      const InformationCircleIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      );
+
+      const XIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      );
+
+      const MicrophoneIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+        </svg>
+      );
+
+      const SparklesIcon = ({ className = 'h-6 w-6' }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className={className}>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+        </svg>
+      );
+
+      const Spinner = ({ className = 'w-8 h-8 text-white', title = 'Loading...' }) => (
+        <svg className={`animate-spin ${className}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-label={title}>
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      );
+
+      const ToastItem = ({ toast, onRemove }) => {
+        useEffect(() => {
+          const timer = setTimeout(() => {
+            onRemove(toast.id);
+          }, 5000);
+          return () => clearTimeout(timer);
+        }, [toast.id, onRemove]);
+
+        const icons = {
+          success: <CheckCircleIcon className="h-6 w-6 text-green-500 flex-shrink-0" />,
+          error: <XCircleIcon className="h-6 w-6 text-red-500 flex-shrink-0" />,
+          info: <InformationCircleIcon className="h-6 w-6 text-blue-500 flex-shrink-0" />,
+        };
+
+        return (
+          <div className="bg-white dark:bg-gray-800 shadow-xl border border-gray-100 dark:border-gray-700 rounded-lg p-4 flex items-start space-x-3 transition-all duration-200">
+            <div className="flex-shrink-0">{icons[toast.type]}</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 break-words">{toast.message}</p>
+            </div>
+            <button onClick={() => onRemove(toast.id)} className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors p-0.5 rounded">
+              <XIcon className="h-4 w-4" />
+            </button>
+          </div>
+        );
+      };
+
+      const Toast = ({ toasts, setToasts }) => {
+        const removeToast = useCallback((id) => {
+          setToasts(prev => prev.filter(t => t.id !== id));
+        }, [setToasts]);
+
+        return (
+          <div className="fixed bottom-5 right-5 z-50 space-y-2 w-full max-w-sm pointer-events-auto">
+            {toasts.map(toast => (
+              <ToastItem key={toast.id} toast={toast} onRemove={removeToast} />
+            ))}
+          </div>
+        );
+      };
+
+      const WordItem = ({ word, onRegenerate, onDelete, onOpenSpellingBee, onImageClick, onSpeak }) => {
+        const audioRef = useRef(null);
+
+        const playAudio = () => {
+          if (word.audioUrl) {
+            if (audioRef.current) {
+              audioRef.current.currentTime = 0;
+              audioRef.current.play();
+            } else {
+              const audio = new Audio(word.audioUrl);
+              audio.play();
+            }
+          } else if (onSpeak) {
+            onSpeak(word.text);
+          } else if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(word.text);
+            utterance.lang = 'en-US';
+            utterance.rate = 0.8;
+            window.speechSynthesis.speak(utterance);
+          }
+        };
+
+        const handleImageClick = () => {
+          playAudio();
+          if (onImageClick) {
+            onImageClick(word);
+          }
+        };
+
+        return (
+          <div className="p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm flex items-center justify-between space-x-4">
+            {word.imageUrl ? (
+              <img
+                src={word.imageUrl}
+                alt={word.text}
+                onClick={handleImageClick}
+                className="w-32 h-32 sm:w-40 sm:h-40 object-contain flex-shrink-0 cursor-pointer hover:opacity-80 transition transform hover:scale-105 filter drop-shadow-md"
+                title="Tap to listen"
+              />
+            ) : (
+              <div
+                onClick={handleImageClick}
+                className="w-32 h-32 sm:w-40 sm:h-40 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-bold text-base flex items-center justify-center p-1 text-center flex-shrink-0 cursor-pointer hover:opacity-80 transition transform hover:scale-105 border border-indigo-200 dark:border-indigo-700 overflow-hidden leading-tight"
+                title="Tap to listen"
+              >
+                {word.text}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p
+                onClick={playAudio}
+                className="text-lg font-bold text-gray-900 dark:text-white truncate cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition"
+                title="Tap to listen"
+              >
+                {word.text}
+              </p>
+              {word.phonetic && <p className="text-sm text-gray-500 dark:text-gray-400">{word.phonetic}</p>}
+              {word.sentence && <p className="text-xs text-gray-400 dark:text-gray-500 italic mt-1 truncate">{word.sentence}</p>}
+              {word.error && <p className="text-xs text-red-500 mt-1">{word.error}</p>}
+            </div>
+
+            <div className="flex items-center space-x-2 flex-shrink-0">
+              {word.status === WordStatus.PENDING && (
+                <span className="text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded">Pending</span>
+              )}
+              {word.status === WordStatus.PROCESSING && <Spinner className="w-5 h-5 text-indigo-500" />}
+              {word.status === WordStatus.COMPLETED && (
+                <>
+                  <button onClick={playAudio} className="p-1.5 text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition" title="Play Sound">
+                    <PlayIcon className="h-5 w-5" />
+                  </button>
+                  {word.audioUrl && <audio ref={audioRef} src={word.audioUrl} preload="auto" />}
+                  <button onClick={() => onOpenSpellingBee(word)} className="p-1.5 text-gray-600 dark:text-gray-300 hover:text-green-600 dark:hover:text-green-400 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition" title="Practice Spelling">
+                    <MicrophoneIcon className="h-5 w-5" />
+                  </button>
+                </>
+              )}
+              {word.status === WordStatus.FAILED && (
+                <span className="text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-2 py-1 rounded">Failed</span>
+              )}
+              <button onClick={() => onRegenerate(word.id)} className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition" title="Regenerate">
+                <RefreshIcon className="h-4 w-4" />
+              </button>
+              <button onClick={() => onDelete(word.id)} className="p-1.5 text-red-400 hover:text-red-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition" title="Delete">
+                <TrashIcon className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        );
+      };
+
+      const MainContent = ({
+        words,
+        onAddWords,
+        onFileLoad,
+        onGenerate,
+        onDeleteWord,
+        onRegenerateWord,
+        onOpenSpellingBee,
+        onImageClick,
+        onSpeak,
+        isGenerating,
+      }) => {
+        const allIds = words.map(w => w.id);
+
+        return (
+          <main className="flex-1 p-6 space-y-6">
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-4">
+              <div className="text-sm font-medium">
+                Total Words: <span className="font-bold text-indigo-600 dark:text-indigo-400">{words.length}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => onGenerate(allIds)}
+                  disabled={allIds.length === 0 || isGenerating}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-md transition flex items-center space-x-2 disabled:opacity-50"
+                >
+                  <SparklesIcon className="h-5 w-5" />
+                  <span>Regenerate All</span>
+                </button>
+              </div>
+            </div>
+
+            {words.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {words.map(w => (
+                  <WordItem
+                    key={w.id}
+                    word={w}
+                    onRegenerate={onRegenerateWord}
+                    onDelete={onDeleteWord}
+                    onOpenSpellingBee={onOpenSpellingBee}
+                    onImageClick={onImageClick}
+                    onSpeak={onSpeak}
+                  />
+                ))}
+              </div>
+            )}
+          </main>
+        );
+      };
+
+      const SpellingBee = ({ word, onClose, onPronounce, onSpellOut }) => {
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-950/80 backdrop-blur-md">
+            <div className="bg-white dark:bg-gray-800 p-6 sm:p-8 rounded-3xl max-w-2xl w-full text-center relative shadow-2xl border border-gray-200 dark:border-gray-700 max-h-[96vh] flex flex-col justify-between overflow-y-auto">
+              <button onClick={onClose} className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl font-bold">
+                ✕
+              </button>
+
+              <h1 className="font-bubble text-4xl sm:text-5xl font-extrabold tracking-widest mb-1 text-gray-900 dark:text-white drop-shadow-sm">
+                FOOTPRINTS
+              </h1>
+              <h2 className="text-xl font-bold mb-2 text-indigo-600 dark:text-indigo-400">Spelling Challenge</h2>
+              {word.imageUrl ? (
+                <img 
+                  src={word.imageUrl} 
+                  alt={word.text} 
+                  onClick={() => onPronounce(word.text)}
+                  className="w-full max-w-xl h-auto max-h-[60vh] object-contain mx-auto mb-4 cursor-pointer hover:opacity-80 transition transform hover:scale-105 filter drop-shadow-xl" 
+                  title="Tap to listen"
+                />
+              ) : (
+                <div 
+                  onClick={() => onPronounce(word.text)}
+                  className="w-full max-w-xl h-64 sm:h-80 mx-auto rounded-xl mb-4 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 font-black text-3xl flex items-center justify-center p-3 text-center cursor-pointer hover:opacity-80 transition transform hover:scale-105 border-2 border-indigo-300 dark:border-indigo-600 break-words" 
+                  title="Tap to listen"
+                >
+                  {word.text}
+                </div>
+              )}
+
+              <p className="text-3xl font-black text-gray-800 dark:text-white mb-6">{word.text}</p>
+
+              <div className="flex justify-center gap-3">
+                <button
+                  onClick={() => onPronounce(word.text)}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex items-center space-x-2 transition shadow"
+                >
+                  <PlayIcon className="h-5 w-5" />
+                  <span>Listen</span>
+                </button>
+                <button
+                  onClick={() => onSpellOut(word.text)}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center space-x-2 transition shadow"
+                >
+                  <MicrophoneIcon className="h-5 w-5" />
+                  <span>Spell Out</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const SpinningWheel = ({ words, onClose, background, logo, onSpeak }) => {
+        const canvasRef = useRef(null);
+        const [selectedWord, setSelectedWord] = useState(null);
+        const [isSpinning, setIsSpinning] = useState(false);
+        const [showCard, setShowCard] = useState(false);
+        const [isSpeakingWholeWord, setIsSpeakingWholeWord] = useState(false);
+        const [canvasSize, setCanvasSize] = useState(500);
+        const [removedWordIds, setRemovedWordIds] = useState(new Set());
+        const [hasSpokenFinalBee, setHasSpokenFinalBee] = useState(false);
+        const [showIntroBee, setShowIntroBee] = useState(false);
+        const [hideWords, setHideWords] = useState(false);
+
+        const currentAngleRef = useRef(0);
+        const angularVelocityRef = useRef(0);
+        const animationFrameRef = useRef(0);
+        const loadedImagesRef = useRef({});
+        const lastTickSegmentRef = useRef(-1);
+        const audioCtxRef = useRef(null);
+        const pointerDeflectionRef = useRef(0);
+        const beeBuzzRef = useRef(null);
+
+        const FOOTPRINTS_LOGO_URL = 'https://raw.githubusercontent.com/Milko-arch/logo-footprints-blanco/9e90f8e6b50a448d0ffdd8bb893a5119a944f7c5/Gemini_Generated_Image_g7e2fsg7e2fsg7e2-removebg-preview.png';
+
+        const startBeeBuzz = useCallback(() => {
+          try {
+            if (!audioCtxRef.current) {
+              audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const ctx = audioCtxRef.current;
+            if (ctx.state === 'suspended') {
+              ctx.resume().catch(() => {});
+            }
+            if (beeBuzzRef.current) return;
+
+            const osc1 = ctx.createOscillator();
+            osc1.type = 'sawtooth';
+            osc1.frequency.setValueAtTime(210, ctx.currentTime);
+
+            const osc2 = ctx.createOscillator();
+            osc2.type = 'triangle';
+            osc2.frequency.setValueAtTime(420, ctx.currentTime);
+
+            const flightLfo = ctx.createOscillator();
+            const flightGain = ctx.createGain();
+            flightLfo.type = 'sine';
+            flightLfo.frequency.setValueAtTime(0.7, ctx.currentTime);
+            flightGain.gain.setValueAtTime(14, ctx.currentTime);
+            flightLfo.connect(flightGain);
+            flightGain.connect(osc1.frequency);
+            flightGain.connect(osc2.frequency);
+
+            const wingLfo = ctx.createOscillator();
+            const wingFmGain = ctx.createGain();
+            wingLfo.type = 'sine';
+            wingLfo.frequency.setValueAtTime(28, ctx.currentTime);
+            wingFmGain.gain.setValueAtTime(12, ctx.currentTime);
+            wingLfo.connect(wingFmGain);
+            wingFmGain.connect(osc1.frequency);
+            wingFmGain.connect(osc2.frequency);
+
+            const tremoloGain = ctx.createGain();
+            tremoloGain.gain.setValueAtTime(0.6, ctx.currentTime);
+            const wingAmGain = ctx.createGain();
+            wingAmGain.gain.setValueAtTime(0.2, ctx.currentTime);
+            wingLfo.connect(wingAmGain);
+            wingAmGain.connect(tremoloGain.gain);
+
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(880, ctx.currentTime);
+            filter.Q.setValueAtTime(1.8, ctx.currentTime);
+
+            const masterGain = ctx.createGain();
+            masterGain.gain.setValueAtTime(0.0001, ctx.currentTime);
+            masterGain.gain.exponentialRampToValueAtTime(0.02, ctx.currentTime + 0.3);
+
+            osc1.connect(filter);
+            osc2.connect(filter);
+            filter.connect(tremoloGain);
+            tremoloGain.connect(masterGain);
+            masterGain.connect(ctx.destination);
+
+            osc1.start();
+            osc2.start();
+            flightLfo.start();
+            wingLfo.start();
+
+            beeBuzzRef.current = { osc1, osc2, flightLfo, wingLfo, masterGain, filter, tremoloGain };
+          } catch (e) {}
+        }, []);
+
+        const stopBeeBuzz = useCallback(() => {
+          if (!beeBuzzRef.current) return;
+          try {
+            const ctx = audioCtxRef.current;
+            const { osc1, osc2, flightLfo, wingLfo, masterGain } = beeBuzzRef.current;
+            if (ctx && masterGain) {
+              masterGain.gain.setValueAtTime(masterGain.gain.value, ctx.currentTime);
+              masterGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2);
+              setTimeout(() => {
+                try {
+                  osc1.stop();
+                  osc2.stop();
+                  flightLfo.stop();
+                  wingLfo.stop();
+                  osc1.disconnect();
+                  osc2.disconnect();
+                  flightLfo.disconnect();
+                  wingLfo.disconnect();
+                } catch (err) {}
+              }, 220);
+            }
+          } catch (e) {}
+          beeBuzzRef.current = null;
+        }, []);
+
+        const playTick = useCallback(() => {
+          try {
+            if (!audioCtxRef.current) {
+              audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const ctx = audioCtxRef.current;
+            if (ctx.state === 'suspended') {
+              ctx.resume();
+            }
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(800 + Math.random() * 80, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.012);
+
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.012);
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.012);
+          } catch (e) {}
+        }, []);
+
+        const validWords = useMemo(() => words.filter(w => w.status !== WordStatus.FAILED && !removedWordIds.has(w.id)), [words, removedWordIds]);
+
+        const validWordsRef = useRef(validWords);
+        useEffect(() => {
+          validWordsRef.current = validWords;
+        }, [validWords]);
+
+        const playCelebrationChime = useCallback(() => {
+          try {
+            if (!audioCtxRef.current) {
+              audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const ctx = audioCtxRef.current;
+            if (ctx.state === 'suspended') {
+              ctx.resume();
+            }
+            const now = ctx.currentTime;
+            const notes = [523.25, 659.25, 783.99, 1046.5];
+            notes.forEach((freq, idx) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(freq, now + idx * 0.09);
+              gain.gain.setValueAtTime(0.2, now + idx * 0.09);
+              gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.09 + 0.3);
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.start(now + idx * 0.09);
+              osc.stop(now + idx * 0.09 + 0.3);
+            });
+          } catch (e) {}
+        }, []);
+
+        const getBestSpanishVoice = useCallback(() => {
+          if (!window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
+          const availVoices = window.speechSynthesis.getVoices();
+          const spanishVoices = availVoices.filter(v => 
+            v.lang && (v.lang.toLowerCase().startsWith('es') || v.lang.toLowerCase().includes('spanish'))
+          );
+          if (spanishVoices.length === 0) return null;
+
+          const naturalKeywords = [
+            'natural', 'neural', 'google', 'online', 'premium', 'enhanced',
+            'sabina', 'helena', 'dalia', 'monica', 'paulina', 'lucia', 'paloma', 'mia', 'jorge'
+          ];
+
+          const sorted = [...spanishVoices].sort((a, b) => {
+            const aName = (a.name || '').toLowerCase();
+            const bName = (b.name || '').toLowerCase();
+            const aScore = naturalKeywords.reduce((acc, kw) => acc + (aName.includes(kw) ? 2 : 0), 0) + (a.localService === false ? 1 : 0);
+            const bScore = naturalKeywords.reduce((acc, kw) => acc + (bName.includes(kw) ? 2 : 0), 0) + (b.localService === false ? 1 : 0);
+            return bScore - aScore;
+          });
+
+          return sorted[0] || spanishVoices[0];
+        }, []);
+
+        const speakBeeMessage = useCallback(() => {
+          if (!window.speechSynthesis) return;
+
+          try {
+            window.speechSynthesis.resume();
+            window.speechSynthesis.cancel();
+          } catch (e) {}
+
+          const phraseEs = "¡Practica más y serás un experto, vamos, tú puedes!";
+          const phraseEn = "Practice more and you will be an expert, come on, you can do it!";
+
+          const utteranceEs = new SpeechSynthesisUtterance(phraseEs);
+          utteranceEs.lang = 'es-ES';
+          utteranceEs.rate = 0.88;
+          utteranceEs.pitch = 1.1;
+          utteranceEs.volume = 1.0;
+
+          const utteranceEn = new SpeechSynthesisUtterance(phraseEn);
+          utteranceEn.lang = 'en-US';
+          utteranceEn.rate = 0.8;
+          utteranceEn.pitch = 1.05;
+          utteranceEn.volume = 1.0;
+
+          const getVoiceAndSpeak = () => {
+            const esVoice = getBestSpanishVoice();
+            if (esVoice) {
+              utteranceEs.voice = esVoice;
+              utteranceEs.lang = esVoice.lang;
+            }
+
+            const availVoices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+            const enVoice = availVoices.find(v => 
+              v.lang && (v.lang.toLowerCase().startsWith('en') || v.lang.toLowerCase().includes('english'))
+            );
+            if (enVoice) {
+              utteranceEn.voice = enVoice;
+              utteranceEn.lang = enVoice.lang;
+            }
+
+            window._beeUtteranceRef = { utteranceEs, utteranceEn };
+
+            utteranceEs.onend = () => {
+              setTimeout(() => {
+                try {
+                  window.speechSynthesis.resume();
+                  window.speechSynthesis.speak(utteranceEn);
+                } catch (e) {}
+              }, 400);
+            };
+
+            utteranceEn.onend = () => {
+              window._beeUtteranceRef = null;
+            };
+
+            utteranceEs.onerror = () => {
+              try {
+                window.speechSynthesis.resume();
+                window.speechSynthesis.speak(utteranceEn);
+              } catch (e) {
+                window._beeUtteranceRef = null;
+              }
+            };
+
+            utteranceEn.onerror = () => {
+              window._beeUtteranceRef = null;
+            };
+
+            try {
+              window.speechSynthesis.resume();
+              window.speechSynthesis.speak(utteranceEs);
+            } catch (err) {
+              console.error('Error al reproducir voz final de la abejita:', err);
+            }
+          };
+
+          if (window.speechSynthesis.getVoices().length === 0) {
+            window.speechSynthesis.onvoiceschanged = () => {
+              getVoiceAndSpeak();
+            };
+          } else {
+            getVoiceAndSpeak();
+          }
+        }, [getBestSpanishVoice]);
+
+        useEffect(() => {
+          const isBeeFlying = !isSpinning && !showCard && validWords.length === 0 && words.length > 0;
+          if (isBeeFlying) {
+            startBeeBuzz();
+          } else {
+            stopBeeBuzz();
+          }
+          return () => {
+            stopBeeBuzz();
+          };
+        }, [isSpinning, showCard, validWords.length, words.length, startBeeBuzz, stopBeeBuzz]);
+
+        useEffect(() => {
+          const unlockAudio = () => {
+            if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+              audioCtxRef.current.resume().catch(() => {});
+            }
+          };
+          window.addEventListener('click', unlockAudio, { once: true });
+          window.addEventListener('touchstart', unlockAudio, { once: true });
+          return () => {
+            window.removeEventListener('click', unlockAudio);
+            window.removeEventListener('touchstart', unlockAudio);
+          };
+        }, []);
+
+        useEffect(() => {
+          if (validWords.length === 0 && !showCard && !isSpinning && words.length > 0) {
+            if (!hasSpokenFinalBee) {
+              setHasSpokenFinalBee(true);
+              playCelebrationChime();
+              const timer = setTimeout(() => {
+                speakBeeMessage();
+              }, 350);
+              return () => clearTimeout(timer);
+            }
+          } else if (validWords.length > 0 && hasSpokenFinalBee) {
+            setHasSpokenFinalBee(false);
+          }
+        }, [validWords.length, showCard, isSpinning, words.length, hasSpokenFinalBee, speakBeeMessage, playCelebrationChime]);
+
+        useEffect(() => {
+          const handleKeyDown = (e) => {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U' || e.code === 'KeyU')) {
+              e.preventDefault();
+              cancelAnimationFrame(animationFrameRef.current);
+              setIsSpinning(false);
+              setShowCard(false);
+              setHasSpokenFinalBee(true);
+              setRemovedWordIds(new Set(words.map(w => w.id)));
+              playCelebrationChime();
+              setTimeout(() => {
+                speakBeeMessage();
+              }, 250);
+            }
+          };
+
+          window.addEventListener('keydown', handleKeyDown);
+          return () => window.removeEventListener('keydown', handleKeyDown);
+        }, [words, playCelebrationChime, speakBeeMessage]);
+
+        const colors = useMemo(() => [
+          '#F43F5E', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EC4899', '#06B6D4', '#6366F1'
+        ], []);
+
+        useEffect(() => {
+          const updateSize = () => {
+            const widthBound = window.innerWidth - 32;
+            const heightBound = window.innerHeight - (window.innerWidth < 640 ? 160 : 130);
+            const size = Math.min(widthBound, heightBound, 750);
+            setCanvasSize(Math.max(size, 240));
+          };
+          updateSize();
+          window.addEventListener('resize', updateSize);
+          return () => window.removeEventListener('resize', updateSize);
+        }, []);
+
+        const drawWheel = useCallback(() => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+
+          // High-DPI (Retina) scaling support
+          const dpr = window.devicePixelRatio || 1;
+          if (canvas.width !== Math.round(canvasSize * dpr) || canvas.height !== Math.round(canvasSize * dpr)) {
+            canvas.width = Math.round(canvasSize * dpr);
+            canvas.height = Math.round(canvasSize * dpr);
+          }
+
+          ctx.save();
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+
+          const numSegments = validWords.length;
+          const segmentAngle = (2 * Math.PI) / (numSegments || 1);
+          const centerX = canvasSize / 2;
+          const centerY = canvasSize / 2;
+          const radius = canvasSize / 2 - 25;
+
+          ctx.clearRect(0, 0, canvasSize, canvasSize);
+
+          // Draw segments
+          validWords.forEach((word, index) => {
+            const startAngle = currentAngleRef.current + index * segmentAngle;
+            const endAngle = startAngle + segmentAngle;
+
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+            ctx.closePath();
+            ctx.fillStyle = colors[index % colors.length];
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
+
+            // Word text and image illustration inside slice
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(startAngle + segmentAngle / 2);
+
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 3;
+            const fontSize = Math.max(12, Math.floor(canvasSize / 28));
+            ctx.font = `bold ${fontSize}px sans-serif`;
+
+            const loadedImg = loadedImagesRef.current[word.id];
+            if (loadedImg) {
+              const imgSize = Math.max(20, Math.floor(canvasSize / 15));
+              ctx.drawImage(loadedImg, radius - 30 - imgSize, -imgSize / 2, imgSize, imgSize);
+              if (!hideWords) {
+                ctx.fillText(word.text, radius - 38 - imgSize, fontSize / 3);
+              }
+            } else {
+              if (!hideWords) {
+                ctx.fillText(word.text, radius - 25, fontSize / 3);
+              }
+            }
+            ctx.shadowBlur = 0;
+
+            ctx.restore();
+          });
+
+          // Draw Center Circle
+          const centerRadius = Math.max(25, Math.floor(canvasSize * 0.08));
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, centerRadius, 0, 2 * Math.PI);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = '#333333';
+          ctx.stroke();
+
+          // Pointer with flapper deflection, pointing 180 degrees inward toward center
+          const pivotX = centerX + radius + 18;
+          const pivotY = centerY;
+          const deflection = pointerDeflectionRef.current || 0;
+
+          ctx.save();
+          ctx.translate(pivotX, pivotY);
+          ctx.rotate(deflection);
+
+          ctx.beginPath();
+          ctx.moveTo(-33, 0);
+          ctx.lineTo(0, -15);
+          ctx.lineTo(0, 15);
+          ctx.closePath();
+          ctx.fillStyle = '#e11d48';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#333333';
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.arc(0, 0, 3.5, 0, 2 * Math.PI);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.restore();
+          ctx.restore();
+        }, [validWords, colors, canvasSize, hideWords]);
+
+        useEffect(() => {
+          let isMounted = true;
+          validWords.forEach(word => {
+            if (word.imageUrl && !loadedImagesRef.current[word.id]) {
+              const img = new Image();
+              img.src = word.imageUrl;
+              img.onload = () => {
+                if (isMounted) {
+                  loadedImagesRef.current[word.id] = img;
+                  drawWheel();
+                }
+              };
+            }
+          });
+          return () => { isMounted = false; };
+        }, [validWords, drawWheel]);
+
+        useEffect(() => {
+          drawWheel();
+        }, [drawWheel]);
+
+        const spin = () => {
+          const activeList = validWordsRef.current;
+          if (isSpinning || activeList.length === 0) return;
+          setIsSpinning(true);
+          setShowCard(false);
+
+          const randomSpins = 5 + Math.random() * 5;
+          const targetDuration = 4000;
+          const startTime = performance.now();
+          const initialVelocity = (randomSpins * 2 * Math.PI) / 200;
+          angularVelocityRef.current = initialVelocity;
+
+          const numSegments = activeList.length;
+          const segmentAngle = (2 * Math.PI) / (numSegments || 1);
+
+          const animate = (currentTime) => {
+            const elapsed = currentTime - startTime;
+            if (elapsed < targetDuration) {
+              const progress = elapsed / targetDuration;
+              const easeOut = 1 - Math.pow(1 - progress, 3);
+              currentAngleRef.current += (1 - easeOut) * angularVelocityRef.current;
+              
+              const currentSegment = Math.floor(currentAngleRef.current / segmentAngle);
+              if (currentSegment !== lastTickSegmentRef.current) {
+                playTick();
+                lastTickSegmentRef.current = currentSegment;
+                pointerDeflectionRef.current = 0.28;
+              }
+
+              pointerDeflectionRef.current = -pointerDeflectionRef.current * 0.65;
+              if (Math.abs(pointerDeflectionRef.current) < 0.005) {
+                pointerDeflectionRef.current = 0;
+              }
+
+              drawWheel();
+              animationFrameRef.current = requestAnimationFrame(animate);
+            } else {
+              pointerDeflectionRef.current = 0;
+              setIsSpinning(false);
+              const currentValid = validWordsRef.current;
+              const numSegments = currentValid.length;
+              if (numSegments > 0) {
+                const segmentAngle = (2 * Math.PI) / numSegments;
+                const normalizedAngle = (2 * Math.PI - (currentAngleRef.current % (2 * Math.PI))) % (2 * Math.PI);
+                const winningIndex = Math.floor(normalizedAngle / segmentAngle) % numSegments;
+                const chosen = currentValid[winningIndex];
+                setSelectedWord(chosen);
+                setShowCard(true);
+                if (chosen) {
+                  setRemovedWordIds(prev => new Set(prev).add(chosen.id));
+                  if (!hideWords) {
+                    playWordAudio(chosen.text);
+                  }
+                }
+              }
+            }
+          };
+
+          animationFrameRef.current = requestAnimationFrame(animate);
+        };
+
+        useEffect(() => {
+          return () => cancelAnimationFrame(animationFrameRef.current);
+        }, []);
+
+        const handleContainerClick = () => {
+          if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+            audioCtxRef.current.resume().catch(() => {});
+          }
+          if (showCard) return;
+          spin();
+        };
+
+        const playImageSound = () => {
+          if (!selectedWord) return;
+          if (hideWords) return;
+          playWordAudio(selectedWord.text);
+        };
+
+        const playWordAudio = (wordText) => {
+          setIsSpeakingWholeWord(true);
+          return new Promise((resolve) => {
+            let resolved = false;
+            const done = () => {
+              if (!resolved) {
+                resolved = true;
+                setIsSpeakingWholeWord(false);
+                resolve();
+              }
+            };
+            if (selectedWord && selectedWord.audioUrl) {
+              const audio = new Audio(selectedWord.audioUrl);
+              audio.onended = done;
+              audio.onerror = done;
+              audio.play().catch(done);
+              setTimeout(done, 3000);
+            } else if (window.speechSynthesis) {
+              window.speechSynthesis.cancel();
+              const utterance = new SpeechSynthesisUtterance(wordText);
+              utterance.lang = 'en-US';
+              utterance.rate = 0.8;
+              utterance.onend = done;
+              utterance.onerror = done;
+              window.speechSynthesis.speak(utterance);
+              setTimeout(done, 3000);
+            } else {
+              done();
+            }
+          });
+        };
+
+        return (
+          <div 
+            className="fixed inset-0 z-50 flex flex-col items-center justify-between p-2 sm:p-4 bg-orange-500 text-gray-900 transition-colors duration-300 overflow-hidden"
+          >
+            {/* Header / Top Bar */}
+            <div className="relative w-full flex justify-between items-center z-10 px-1 sm:px-2 pt-1">
+              <div className="flex items-center z-10 flex-shrink-0">
+                {logo ? (
+                  <img src={logo} alt="Logo" className="h-8 sm:h-12 w-auto max-w-[100px] sm:max-w-[150px] object-contain" />
+                ) : (
+                  <div className="text-2xl sm:text-3xl">🐝</div>
+                )}
+              </div>
+
+              {/* Title exactly centered relative to the wheel replaced by white Footprints logo */}
+              <div className="absolute left-1/2 -translate-x-1/2 top-0 pointer-events-none z-0 flex justify-center items-center w-auto">
+                <img
+                  src={FOOTPRINTS_LOGO_URL}
+                  alt="Footprints Logo"
+                  className="h-10 xs:h-12 sm:h-16 md:h-20 w-auto object-contain filter drop-shadow-md"
+                />
+              </div>
+
+              <div className="flex items-center sm:items-start space-x-1.5 sm:space-x-2 z-10 justify-end ml-auto flex-shrink-0">
+                {/* Botón para alternar visibilidad de palabras */}
+                <button
+                  onClick={() => setHideWords(prev => !prev)}
+                  className={`p-1.5 sm:p-2 rounded-full font-bold shadow-lg transition text-white ${
+                    hideWords ? 'bg-amber-700 hover:bg-amber-800 ring-2 ring-white' : 'bg-amber-600 hover:bg-amber-700'
+                  }`}
+                  title={hideWords ? "Mostrar texto de palabras" : "Ocultar texto de palabras"}
+                >
+                  {hideWords ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-4 w-4 sm:h-6 sm:w-6">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-4 w-4 sm:h-6 sm:w-6">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  )}
+                </button>
+                {removedWordIds.size > 0 && (
+                  <button
+                    onClick={() => { setRemovedWordIds(new Set()); stopBeeBuzz(); }}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl shadow transition"
+                    title="Reset words on wheel"
+                  >
+                    🔄 <span className="hidden xs:inline">Reset</span> ({removedWordIds.size})
+                  </button>
+                )}
+                <button
+                  onClick={() => { stopBeeBuzz(); onClose(); }}
+                  className="bg-red-500 hover:bg-red-600 text-white p-1.5 sm:p-2 rounded-full font-bold shadow-lg transition"
+                  title="Close Wheel"
+                >
+                  <XIcon className="h-4 w-4 sm:h-6 sm:w-6" />
+                </button>
+              </div>
+            </div>
+
+            {/* Wheel Container */}
+            <div className="relative flex-1 flex items-center justify-center my-2 sm:my-4 cursor-pointer w-full max-h-[75vh]" onClick={handleContainerClick}>
+              <canvas
+                ref={canvasRef}
+                style={{ width: `${canvasSize}px`, height: `${canvasSize}px` }}
+                className="max-w-full max-h-[62vh] sm:max-h-[70vh] rounded-full shadow-2xl object-contain"
+              />
+              
+              {!isSpinning && !showCard && validWords.length > 0 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); spin(); }}
+                  className="absolute inset-0 m-auto w-16 h-16 sm:w-24 sm:h-24 text-white font-black text-sm sm:text-xl rounded-full shadow-2xl flex items-center justify-center border-2 sm:border-4 border-white transition transform bg-indigo-600 hover:bg-indigo-700 hover:scale-105 cursor-pointer"
+                  title="Girar ruleta"
+                >
+                  SPIN
+                </button>
+              )}
+
+              {!isSpinning && !showCard && validWords.length === 0 && (
+                <div className="absolute inset-0 m-auto flex flex-col items-center justify-center gap-2 p-2 pointer-events-auto">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setRemovedWordIds(new Set()); setHasSpokenFinalBee(false); stopBeeBuzz(); }}
+                    className="px-4 py-2 sm:px-6 sm:py-3 h-auto max-w-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm sm:text-lg rounded-xl sm:rounded-2xl shadow-2xl flex items-center justify-center border-2 sm:border-4 border-white transition transform hover:scale-105"
+                  >
+                    🔄 Reset Wheel
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); stopBeeBuzz(); onClose(); if (window._openUnit2Quiz) window._openUnit2Quiz(); }}
+                    className="px-4 py-2 sm:px-6 sm:py-3 h-auto max-w-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm sm:text-lg rounded-xl sm:rounded-2xl shadow-2xl flex items-center justify-center border-2 sm:border-4 border-white transition transform hover:scale-105 animate-pulse"
+                  >
+                    🎧 Go to Unit 2: Quiz
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Flying Bee animation when completed */}
+            {!isSpinning && !showCard && validWords.length === 0 && words.length > 0 && (
+              <div 
+                className="bee-flying-screen select-none flex flex-col items-center"
+                onClick={(e) => { e.stopPropagation(); startBeeBuzz(); speakBeeMessage(); }}
+                title="Toca para escuchar"
+              >
+                <div className="text-6xl sm:text-8xl filter drop-shadow-2xl hover:scale-125 transition-transform animate-bounce">
+                  🐝
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="w-full text-center py-1 sm:py-2 z-10 select-none flex-shrink-0">
+              <p className="text-xs sm:text-sm font-semibold tracking-wide text-white drop-shadow">
+                By: Ing. Milko Gonzales C.
+              </p>
+            </div>
+
+            {/* Result Modal Card overlay when wheel stops */}
+            {showCard && selectedWord && (
+              <div 
+                className="fixed inset-0 z-50 flex flex-col items-center justify-between p-3 sm:p-6 select-none transition-colors duration-300 overflow-y-auto max-h-screen bg-orange-500 text-gray-900"
+                onClick={() => setShowCard(false)}
+              >
+                <div className="relative w-full flex justify-between items-start flex-shrink-0">
+                  <div className="w-8"></div>
+                  <div className="absolute left-1/2 -translate-x-1/2 top-0 pointer-events-none z-0 flex justify-center items-center w-auto">
+                    <img
+                      src={FOOTPRINTS_LOGO_URL}
+                      alt="Footprints Logo"
+                      className="h-10 xs:h-12 sm:h-16 md:h-20 w-auto object-contain filter drop-shadow-md"
+                    />
+                  </div>
+
+                  <div className="flex items-start space-x-1.5 sm:space-x-2 z-10 justify-end ml-auto">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowCard(false); }}
+                      className="text-white hover:text-black text-2xl sm:text-3xl font-bold p-1 sm:p-2 transition"
+                      title="Close"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Center Word Display */}
+                <div className="text-center px-2 sm:px-4 max-w-full my-auto flex flex-col items-center justify-center flex-1 w-full overflow-hidden">
+                  {selectedWord.imageUrl && (
+                    <img 
+                      src={selectedWord.imageUrl} 
+                      alt={selectedWord.text} 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!isSpeakingWholeWord) playImageSound();
+                      }}
+                      className="w-full max-w-5xl h-auto max-h-[46vh] xs:max-h-[50vh] sm:max-h-[58vh] md:max-h-[64vh] object-contain mb-2 filter drop-shadow-2xl cursor-pointer hover:scale-[1.02] transition transform bg-white/20 p-2 rounded-2xl"
+                      title="Tap to listen"
+                    />
+                  )}
+
+                  {!hideWords && (
+                    <h1 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!isSpeakingWholeWord) playImageSound();
+                      }}
+                      className={`text-[10vw] sm:text-[9vw] md:text-[8vw] lg:text-[7vw] leading-none font-black drop-shadow-[0_10px_25px_rgba(0,0,0,0.2)] tracking-wider uppercase transform transition-all duration-300 cursor-pointer break-words flex flex-wrap justify-center gap-1 sm:gap-2 md:gap-3 text-white ${
+                        isSpeakingWholeWord ? 'scale-105 sm:scale-115 text-yellow-200' : ''
+                      }`}
+                      title="Tap to listen"
+                    >
+                      {selectedWord.text.split('').map((char, idx) => (
+                        <span key={idx} className="inline-block transition-all duration-300 transform hover:scale-110">
+                          {char}
+                        </span>
+                      ))}
+                    </h1>
+                  )}
+
+                  {!hideWords && (
+                    <p className="mt-2 sm:mt-3 text-xs sm:text-base md:text-lg font-medium animate-pulse text-white drop-shadow">
+                      {isSpeakingWholeWord
+                        ? 'Listening to the complete word... 🔊'
+                        : 'Tap the word to listen 🔊'}
+                    </p>
+                  )}
+                </div>
+
+                {/* Bottom Action Button */}
+                <div className="w-full max-w-md flex flex-col items-center justify-center pb-2 pt-1 flex-shrink-0">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowCard(false);
+                      spin();
+                    }}
+                    className="w-full py-3 sm:py-4 px-6 rounded-xl sm:rounded-2xl font-bold text-sm sm:text-base md:text-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center space-x-2 shadow-xl transition transform hover:scale-105 active:scale-95"
+                  >
+                    <span className="text-xl sm:text-2xl">🎯</span>
+                    <span>Spin again</span>
+                  </button>
+                  <p className="text-[11px] sm:text-xs font-semibold mt-2 tracking-wide text-white drop-shadow">
+                    By: Ing. Milko Gonzales C.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      const ConfettiCanvas = ({ active }) => {
+        const canvasRef = useRef(null);
+
+        useEffect(() => {
+          if (!active) return;
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+
+          const colors = ['#f43f5e', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#fbbf24', '#06b6d4'];
+          const particles = Array.from({ length: 90 }, () => ({
+            x: Math.random() * canvas.width,
+            y: -20 - Math.random() * 50,
+            size: 6 + Math.random() * 8,
+            speedY: 3 + Math.random() * 5,
+            speedX: (Math.random() - 0.5) * 4,
+            rotation: Math.random() * 360,
+            rotationSpeed: (Math.random() - 0.5) * 10,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            shape: Math.random() > 0.4 ? 'rect' : 'circle'
+          }));
+
+          let animationId;
+          const render = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            particles.forEach(p => {
+              ctx.save();
+              ctx.translate(p.x, p.y);
+              ctx.rotate((p.rotation * Math.PI) / 180);
+              ctx.fillStyle = p.color;
+
+              if (p.shape === 'rect') {
+                ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+              } else {
+                ctx.beginPath();
+                ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              ctx.restore();
+
+              p.y += p.speedY;
+              p.x += p.speedX;
+              p.rotation += p.rotationSpeed;
+            });
+            animationId = requestAnimationFrame(render);
+          };
+
+          render();
+          return () => cancelAnimationFrame(animationId);
+        }, [active]);
+
+        if (!active) return null;
+        return (
+          <canvas
+            ref={canvasRef}
+            className="fixed inset-0 pointer-events-none z-[100] w-full h-full"
+          />
+        );
+      };
+
+      const Unit2ListeningQuiz = ({ words, onClose, onSpeakWord }) => {
+        const [quizWords, setQuizWords] = useState([]);
+        const [currentIndex, setCurrentIndex] = useState(0);
+        const [options, setOptions] = useState([]);
+        const [selectedChoice, setSelectedChoice] = useState(null);
+        const [isAnswerChecked, setIsAnswerChecked] = useState(false);
+        const [score, setScore] = useState(0);
+        const [streak, setStreak] = useState(0);
+        const [showStreakModal, setShowStreakModal] = useState(false);
+        const [streakModalNumber, setStreakModalNumber] = useState(5);
+        const [isQuizCompleted, setIsQuizCompleted] = useState(false);
+        const [studentName, setStudentName] = useState('Outstanding Student');
+        const [isEditingName, setIsEditingName] = useState(false);
+        const audioCtxRef = useRef(null);
+
+        // Sound generator via Web Audio API
+        const playQuizTone = useCallback((type) => {
+          try {
+            if (!audioCtxRef.current) {
+              audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const ctx = audioCtxRef.current;
+            if (ctx.state === 'suspended') ctx.resume();
+
+            const now = ctx.currentTime;
+            if (type === 'correct') {
+              const notes = [587.33, 739.99, 880.0, 1174.66]; // D5, F#5, A5, D6
+              notes.forEach((f, i) => {
+                const osc = ctx.createOscillator();
+                const g = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(f, now + i * 0.07);
+                g.gain.setValueAtTime(0.18, now + i * 0.07);
+                g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.22);
+                osc.connect(g);
+                g.connect(ctx.destination);
+                osc.start(now + i * 0.07);
+                osc.stop(now + i * 0.07 + 0.22);
+              });
+            } else if (type === 'wrong') {
+              const osc = ctx.createOscillator();
+              const g = ctx.createGain();
+              osc.type = 'sawtooth';
+              osc.frequency.setValueAtTime(220, now);
+              osc.frequency.linearRampToValueAtTime(140, now + 0.28);
+              g.gain.setValueAtTime(0.2, now);
+              g.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+              osc.connect(g);
+              g.connect(ctx.destination);
+              osc.start(now);
+              osc.stop(now + 0.28);
+            } else if (type === 'streakFanfare') {
+              // Ascending crystalline bell chime arpeggio + victory chord
+              const chordArp = [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98];
+              chordArp.forEach((freq, idx) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+                gain.gain.setValueAtTime(0.25, now + idx * 0.08);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.45);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now + idx * 0.08);
+                osc.stop(now + idx * 0.08 + 0.45);
+              });
+
+              // Final rich major chord
+              const finalChord = [523.25, 659.25, 783.99, 1046.5];
+              const chordStart = now + 0.55;
+              finalChord.forEach(freq => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, chordStart);
+                gain.gain.setValueAtTime(0.2, chordStart);
+                gain.gain.exponentialRampToValueAtTime(0.0001, chordStart + 1.2);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(chordStart);
+                osc.stop(chordStart + 1.2);
+              });
+            }
+          } catch (e) {}
+        }, []);
+
+        useEffect(() => {
+          const valid = words.filter(w => w.status !== WordStatus.FAILED && w.text);
+          const shuffled = [...valid].sort(() => 0.5 - Math.random());
+          setQuizWords(shuffled);
+          setCurrentIndex(0);
+          setScore(0);
+          setStreak(0);
+          setIsQuizCompleted(false);
+        }, [words]);
+
+        const currentTarget = quizWords[currentIndex];
+
+        // Generate 3 choices (1 target + 2 random distractors)
+        useEffect(() => {
+          if (!currentTarget || quizWords.length === 0) return;
+          const otherWords = quizWords.filter(w => w.id !== currentTarget.id);
+          const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
+          const distractors = shuffledOthers.slice(0, 2);
+          const combined = [currentTarget, ...distractors].sort(() => 0.5 - Math.random());
+          setOptions(combined);
+          setSelectedChoice(null);
+          setIsAnswerChecked(false);
+
+          // Auto play the English pronunciation
+          const playTimeout = setTimeout(() => {
+            playTargetSound(currentTarget);
+          }, 350);
+          return () => clearTimeout(playTimeout);
+        }, [currentIndex, quizWords]);
+
+        const playTargetSound = (wordObj) => {
+          if (!wordObj) return;
+          if (wordObj.audioUrl) {
+            const aud = new Audio(wordObj.audioUrl);
+            aud.play().catch(() => {
+              if (onSpeakWord) onSpeakWord(wordObj.text);
+            });
+          } else if (onSpeakWord) {
+            onSpeakWord(wordObj.text);
+          }
+        };
+
+        const speakCheerPhrase = useCallback((streakNum) => {
+          if (!window.speechSynthesis) return;
+          window.speechSynthesis.cancel();
+          const phrases = [
+            `Awesome! ${streakNum} in a row! Keep going!`,
+            `Fantastic job! ${streakNum} in a row! You are on fire!`,
+            `Super work! ${streakNum} consecutive hits! Excellent!`,
+            `Incredible! ${streakNum} in a row! You're a spelling superstar!`
+          ];
+          const text = phrases[Math.floor(Math.random() * phrases.length)];
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'en-US';
+          utterance.rate = 0.88;
+          utterance.pitch = 1.1;
+          window.speechSynthesis.speak(utterance);
+        }, []);
+
+        const handleSelectChoice = (wordChoice) => {
+          if (isAnswerChecked || !currentTarget) return;
+          setIsAnswerChecked(true);
+          setSelectedChoice(wordChoice);
+
+          const isCorrect = wordChoice.id === currentTarget.id;
+          if (isCorrect) {
+            playQuizTone('correct');
+            const newScore = score + 1;
+            const newStreak = streak + 1;
+            setScore(newScore);
+            setStreak(newStreak);
+
+            // Check if streak reaches a multiple of 5
+            if (newStreak > 0 && newStreak % 5 === 0) {
+              setStreakModalNumber(newStreak);
+              setShowStreakModal(true);
+              playQuizTone('streakFanfare');
+              setTimeout(() => {
+                speakCheerPhrase(newStreak);
+              }, 400);
+
+              setTimeout(() => {
+                setShowStreakModal(false);
+                advanceToNext();
+              }, 2800);
+              return;
+            }
+
+            setTimeout(() => {
+              advanceToNext();
+            }, 1200);
+          } else {
+            playQuizTone('wrong');
+            setStreak(0);
+            setTimeout(() => {
+              advanceToNext();
+            }, 1600);
+          }
+        };
+
+        const advanceToNext = () => {
+          if (currentIndex + 1 < quizWords.length) {
+            setCurrentIndex(prev => prev + 1);
+          } else {
+            setIsQuizCompleted(true);
+          }
+        };
+
+        const finalScore = quizWords.length > 0 ? Math.round((score / quizWords.length) * 100) : 0;
+
+        if (isQuizCompleted) {
+          return (
+            <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/90 backdrop-blur-md flex flex-col items-center justify-between p-2 sm:p-4 text-slate-800">
+              {/* Confetti celebration for high scores */}
+              <ConfettiCanvas active={finalScore >= 70} />
+
+              <div className="w-full max-w-4xl flex justify-between items-center py-2 no-print">
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-xs sm:text-sm font-bold shadow transition flex items-center space-x-1"
+                >
+                  <span>✕ Exit to Main</span>
+                </button>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => window.print()}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold rounded-xl text-xs sm:text-sm shadow-lg transition flex items-center space-x-1"
+                  >
+                    <span>🖨️ Print / Save PDF</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const shuffled = [...quizWords].sort(() => 0.5 - Math.random());
+                      setQuizWords(shuffled);
+                      setCurrentIndex(0);
+                      setScore(0);
+                      setStreak(0);
+                      setIsQuizCompleted(false);
+                    }}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs sm:text-sm shadow transition"
+                  >
+                    <span>🔄 Retake Quiz</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Printable Premium Diploma Card */}
+              <div
+                id="diploma-printable-container"
+                className="w-full max-w-4xl bg-[#fffef8] rounded-2xl shadow-2xl p-6 sm:p-10 border-[10px] border-double border-[#b48b3c] relative overflow-hidden my-auto"
+                style={{
+                  backgroundImage: 'radial-gradient(#faf6e8 15%, transparent 16%), radial-gradient(#faf6e8 15%, transparent 16%)',
+                  backgroundSize: '30px 30px',
+                  backgroundPosition: '0 0, 15px 15px'
+                }}
+              >
+                {/* Gold Ornamental Inner Frame */}
+                <div className="border-2 border-[#b48b3c] p-4 sm:p-8 rounded-lg relative">
+                  {/* Decorative Corner Ornaments */}
+                  <div className="absolute top-1 left-1 text-2xl text-amber-600 select-none">⚜</div>
+                  <div className="absolute top-1 right-1 text-2xl text-amber-600 select-none">⚜</div>
+                  <div className="absolute bottom-1 left-1 text-2xl text-amber-600 select-none">⚜</div>
+                  <div className="absolute bottom-1 right-1 text-2xl text-amber-600 select-none">⚜</div>
+
+                  <div className="text-center">
+                    <p className="font-diploma-serif tracking-[0.25em] text-xs sm:text-sm font-bold text-amber-800 uppercase mb-1">
+                       Education Department
+                    </p>
+                    <h1 className="font-diploma-serif text-2xl sm:text-4xl md:text-5xl font-black text-slate-900 tracking-wider uppercase mb-1">
+                      FOOTPRINTS  SYSTEM
+                    </h1>
+                    <div className="flex items-center justify-center space-x-3 my-2">
+                      <div className="h-[2px] w-12 sm:w-24 bg-gradient-to-r from-transparent via-[#b48b3c] to-transparent"></div>
+                      <span className="font-diploma-serif text-base sm:text-xl text-[#92691f] font-black tracking-widest uppercase">
+                        DIPLOMA OF EXCELLENCE
+                      </span>
+                      <div className="h-[2px] w-12 sm:w-24 bg-gradient-to-r from-transparent via-[#b48b3c] to-transparent"></div>
+                    </div>
+
+                    <p className="font-sans-cert text-xs sm:text-sm italic text-slate-600 mt-4 mb-2">
+                      This certificate is proudly awarded to:
+                    </p>
+
+                    {/* Student Name field (interactive click-to-edit) */}
+                    <div className="my-2">
+                      {isEditingName ? (
+                        <input
+                          type="text"
+                          value={studentName}
+                          autoFocus
+                          onChange={(e) => setStudentName(e.target.value)}
+                          onBlur={() => setIsEditingName(false)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') setIsEditingName(false); }}
+                          className="text-center font-diploma-serif text-2xl sm:text-4xl font-extrabold text-[#1e293b] border-b-2 border-amber-500 bg-transparent outline-none w-full max-w-md py-1"
+                        />
+                      ) : (
+                        <h2
+                          onClick={() => setIsEditingName(true)}
+                          className="font-diploma-serif text-2xl sm:text-4xl md:text-5xl font-extrabold text-[#1e293b] tracking-wide border-b-2 border-[#b48b3c] inline-block px-8 py-1 cursor-pointer hover:bg-amber-100/50 rounded transition"
+                          title="Click to change student name"
+                        >
+                          {studentName} ✏️
+                        </h2>
+                      )}
+                    </div>
+
+                    <p className="font-sans-cert text-xs sm:text-base text-slate-700 max-w-2xl mx-auto mt-4 leading-relaxed">
+                      for successfully completing the <span className="font-bold text-slate-900">Unit 2 Listening &amp; Vocabulary Evaluation</span> with an outstanding score of:
+                    </p>
+
+                    {/* Score Ribbon */}
+                    <div className="inline-flex items-center space-x-2 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 font-black px-6 py-2 rounded-full shadow-md my-4">
+                      <span className="text-xl sm:text-2xl">🏆</span>
+                      <span className="font-sans-cert text-xl sm:text-2xl tracking-wide">{finalScore} / 100</span>
+                      <span className="text-xs sm:text-sm uppercase tracking-wider text-amber-950">Points</span>
+                    </div>
+
+                    {/* Bottom Signatures & Seal Section */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 items-end justify-between mt-6 pt-4 border-t border-amber-200 gap-4 text-center">
+                      {/* Left: Issue Date & Verification */}
+                      <div className="text-center sm:text-left text-slate-600 font-sans-cert text-[11px] sm:text-xs">
+                        <p className="font-bold text-slate-800">Spelling Bee Academic League</p>
+                        <p>Unit 2: Listening Competency</p>
+                        <p className="mt-1 text-amber-900 font-semibold">
+                          Date: {new Date().toLocaleDateString()}
+                        </p>
+                      </div>
+
+                      {/* Center: 3D Official Gold Seal */}
+                      <div className="flex justify-center order-last sm:order-none col-span-2 sm:col-span-1">
+                        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-600 p-1.5 shadow-xl flex items-center justify-center border-2 border-amber-100 transform hover:scale-105 transition">
+                          <div className="w-full h-full rounded-full border-2 border-dashed border-amber-950/40 flex flex-col items-center justify-center text-amber-950 leading-none select-none">
+                            <span className="text-[9px] sm:text-[10px] font-extrabold tracking-tighter uppercase">★ OFFICIAL ★</span>
+                            <span className="text-sm sm:text-base font-black my-0.5">SEAL</span>
+                            <span className="text-[8px] sm:text-[9px] font-bold tracking-tighter">FOOTPRINTS</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Hand-drawn Signature & Authority */}
+                      <div className="text-center sm:text-right">
+                        <div className="font-signature text-3xl sm:text-4xl text-[#1e3a8a] leading-none mb-1 select-none">
+                          Milko Gonzales C.
+                        </div>
+                        <div className="h-[1.5px] w-40 sm:w-48 bg-slate-500 mx-auto sm:ml-auto my-1"></div>
+                        <p className="font-sans-cert text-xs sm:text-sm font-bold text-slate-900">
+                          Ing. Milko Gonzales C.
+                        </p>
+                        <p className="font-sans-cert text-[10px] sm:text-[11px] text-slate-600 font-medium">
+                          General Academic Director - Footprints  System
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Printable footer note */}
+              <div className="w-full text-center py-2 text-slate-400 text-xs sm:text-sm font-medium no-print">
+                By: Ing. Milko Gonzales C.
+              </div>
+            </div>
+          );
+        }
+
+        if (!currentTarget) {
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 text-white p-4">
+              <div className="text-center">
+                <Spinner className="w-10 h-10 mx-auto text-indigo-400 mb-3" />
+                <p>Loading Unit 2 Quiz...</p>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="fixed inset-0 z-50 h-[100dvh] max-h-screen bg-gradient-to-b from-slate-900 via-indigo-950 to-slate-950 text-white flex flex-col justify-between p-2 sm:p-4 select-none overflow-hidden">
+            {/* Confetti & Streak Celebration Banner */}
+            <ConfettiCanvas active={showStreakModal} />
+
+            {/* Streak 5-in-a-row Celebration Modal */}
+            {showStreakModal && (
+              <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-600 p-6 sm:p-8 rounded-3xl text-center shadow-2xl border-4 border-white max-w-sm w-full transform scale-105 animate-bounce">
+                  <div className="text-5xl sm:text-6xl mb-2">⭐ 🔥 ⭐</div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-wider uppercase drop-shadow">
+                    {streakModalNumber} IN A ROW!
+                  </h2>
+                  <p className="text-sm sm:text-base font-bold text-amber-950 mt-1">
+                    Unstoppable streak! Keep shining!
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Top Navigation & Status Bar */}
+            <header className="w-full flex items-center justify-between gap-2 flex-shrink-0 pt-1 pb-1">
+              <div className="flex items-center space-x-2">
+                <span className="text-2xl">🎧</span>
+                <div>
+                  <h1 className="font-bubble text-lg sm:text-2xl font-black tracking-wide text-amber-400 leading-tight">
+                    UNIT 2: QUIZ
+                  </h1>
+                  <p className="text-[10px] sm:text-xs text-indigo-200">
+                    Question {currentIndex + 1} of {quizWords.length}
+                  </p>
+                </div>
+              </div>
+
+              {/* Live Score & Streak Counters */}
+              <div className="flex items-center space-x-2 sm:space-x-3">
+                <div className="flex items-center space-x-1 bg-amber-500/20 border border-amber-400/40 px-2 sm:px-3 py-1 rounded-xl text-amber-300 font-black text-xs sm:text-sm">
+                  <span>🔥</span>
+                  <span>{streak}</span>
+                </div>
+                <div className="bg-indigo-600/30 border border-indigo-400/40 px-2 sm:px-3 py-1 rounded-xl text-indigo-200 font-black text-xs sm:text-sm">
+                  ⭐ {score} pts
+                </div>
+                <button
+                  onClick={onClose}
+                  className="bg-red-500/80 hover:bg-red-600 p-1.5 rounded-full text-white font-bold transition shadow"
+                  title="Exit to Main"
+                >
+                  <XIcon className="h-4 w-4" />
+                </button>
+              </div>
+            </header>
+
+            {/* Middle Action Prompt with Listen Again button */}
+            <div className="w-full text-center flex flex-col items-center justify-center my-auto py-1 flex-shrink-0">
+              <p className="text-xs sm:text-sm text-indigo-300 font-semibold tracking-wide uppercase mb-1">
+                Listen carefully &amp; tap the matching picture:
+              </p>
+
+              <button
+                onClick={() => playTargetSound(currentTarget)}
+                className="group relative inline-flex items-center space-x-2 sm:space-x-3 px-5 sm:px-8 py-2.5 sm:py-3.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-400 hover:to-pink-400 text-white rounded-2xl shadow-xl font-black text-base sm:text-xl transition transform active:scale-95 border-2 border-white/30"
+                title="Tap to listen again"
+              >
+                <span className="text-xl sm:text-2xl animate-pulse">🔊</span>
+                <span>Listen Again</span>
+              </button>
+            </div>
+
+            {/* 3-Column Choices Grid adapted for Single-Screen Phone View without Vertical Scroll */}
+            <div className="w-full max-w-5xl mx-auto grid grid-cols-3 gap-2 sm:gap-4 my-auto px-1 flex-1 items-center max-h-[52vh] sm:max-h-[58vh]">
+              {options.map((opt) => {
+                const isSelected = selectedChoice?.id === opt.id;
+                const isTarget = opt.id === currentTarget.id;
+
+                let cardStyle = "border-2 border-white/20 bg-slate-800/80 hover:border-indigo-400 hover:bg-slate-800";
+                let badge = null;
+
+                if (isAnswerChecked) {
+                  if (isTarget) {
+                    cardStyle = "border-4 border-emerald-400 bg-emerald-950/70 shadow-emerald-500/50 shadow-lg scale-[1.02]";
+                    badge = (
+                      <div className="absolute top-2 right-2 bg-emerald-500 text-white rounded-full w-6 h-6 sm:w-8 sm:h-8 flex items-center justify-center font-black text-sm sm:text-base shadow">
+                        ✓
+                      </div>
+                    );
+                  } else if (isSelected && !isTarget) {
+                    cardStyle = "border-4 border-red-500 bg-red-950/70 shadow-red-500/50 shadow-lg opacity-80";
+                    badge = (
+                      <div className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 sm:w-8 sm:h-8 flex items-center justify-center font-black text-sm sm:text-base shadow">
+                        ✗
+                      </div>
+                    );
+                  } else {
+                    cardStyle = "border-2 border-white/10 bg-slate-900/40 opacity-40";
+                  }
+                }
+
+                return (
+                  <button
+                    key={opt.id}
+                    disabled={isAnswerChecked}
+                    onClick={() => handleSelectChoice(opt)}
+                    className={`relative w-full h-full max-h-[46vh] rounded-2xl flex flex-col items-center justify-center p-2 transition-all duration-200 cursor-pointer overflow-hidden ${cardStyle}`}
+                  >
+                    {badge}
+                    {opt.imageUrl ? (
+                      <img
+                        src={opt.imageUrl}
+                        alt={opt.text}
+                        className="w-full h-full max-h-[36vh] sm:max-h-[40vh] object-contain filter drop-shadow-md rounded-xl pointer-events-none"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-4xl sm:text-6xl">
+                        🖼️
+                      </div>
+                    )}
+                    {isAnswerChecked && isTarget && (
+                      <p className="text-xs sm:text-sm font-extrabold text-emerald-300 mt-1 tracking-wider uppercase">
+                        {opt.text}
+                      </p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Bottom Progress Bar & Mandatory Footer */}
+            <footer className="w-full flex-shrink-0 pt-1 pb-0.5 text-center">
+              {/* Progress bar */}
+              <div className="w-full max-w-md mx-auto bg-slate-800 rounded-full h-2 mb-1.5 overflow-hidden border border-white/10">
+                <div
+                  className="bg-gradient-to-r from-indigo-500 to-amber-400 h-full transition-all duration-300 rounded-full"
+                  style={{ width: `${((currentIndex + 1) / quizWords.length) * 100}%` }}
+                ></div>
+              </div>
+              <p className="text-[11px] sm:text-xs font-semibold tracking-wide text-slate-400">
+                By: Ing. Milko Gonzales C.
+              </p>
+            </footer>
+          </div>
+        );
+      };
+
+      const App = () => {
+        const createInitialWords = () => {
+          return DEFAULT_WORDS_LIST.map((wordText, idx) => {
+            const clean = wordText.toLowerCase();
+            return {
+              id: `word-init-${idx}-${clean}`,
+              text: wordText,
+              status: WordStatus.COMPLETED,
+              phonetic: COMMON_IPA[clean] || `/${clean}/`,
+              sentence: COMMON_SENTENCES[clean] || `${wordText} is a great word for practice.`,
+              imageUrl: PROFESSIONAL_WORD_IMAGES[clean] || createWordSvgIllustration(wordText),
+              audioUrl: null,
+              audioData: null,
+              error: null,
+            };
+          });
+        };
+
+        const [words, setWords] = useState(createInitialWords);
+        const [logo, setLogo] = useState(null);
+        const [wheelBackground, setWheelBackground] = useState('#ffffff');
+        const [settings, setSettings] = useState({
+          courseName: 'Footprints Spelling Bee',
+          voice: '',
+          rate: 0.8,
+          pitch: 1,
+          generateImages: true,
+          dictationMode: false,
+        });
+        const [voices, setVoices] = useState([]);
+        const [toasts, setToasts] = useState([]);
+        const [isGenerating, setIsGenerating] = useState(false);
+        const [gameMode, setGameMode] = useState('wheel');
+        const [wordForSpelling, setWordForSpelling] = useState(null);
+        const [viewingImage, setViewingImage] = useState(null);
+
+        const audioContextRef = useRef(null);
+        const wordsRef = useRef([]);
+        wordsRef.current = words;
+
+        useEffect(() => {
+          window._openUnit2Quiz = () => setGameMode('unit2');
+          return () => { window._openUnit2Quiz = null; };
+        }, []);
+
+        const addToast = useCallback((message, type = 'info') => {
+          setToasts((prev) => [...prev, { id: generateUniqueId('toast'), message, type }]);
+        }, []);
+
+        const playSound = useCallback((type) => {
+          try {
+            const ctx = audioContextRef.current || new (window.AudioContext || window.webkitAudioContext)();
+            audioContextRef.current = ctx;
+            if (ctx.state === 'suspended') {
+              ctx.resume();
+            }
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            
+            if (type === 'success') {
+              osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+              osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
+            } else if (type === 'error') {
+              osc.frequency.setValueAtTime(220, ctx.currentTime);
+              osc.frequency.setValueAtTime(180, ctx.currentTime + 0.1);
+            } else {
+              osc.frequency.setValueAtTime(440, ctx.currentTime);
+            }
+            
+            gain.gain.setValueAtTime(0.08, ctx.currentTime);
+            gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.25);
+          } catch (e) {}
+        }, []);
+
+        useEffect(() => {
+          const loadVoices = () => {
+            if (typeof window !== 'undefined' && window.speechSynthesis) {
+              const availableVoices = window.speechSynthesis.getVoices();
+              if (availableVoices.length > 0) {
+                const englishVoices = availableVoices.filter(
+                  v => v.lang && v.lang.toLowerCase().startsWith('en')
+                );
+                const voicesToUse = englishVoices.length > 0 ? englishVoices : availableVoices;
+                setVoices(voicesToUse);
+                
+                const defaultVoice = voicesToUse.find(v => v.lang === 'en-US' || v.lang === 'en_US') || voicesToUse[0];
+                setSettings(prev => (prev.voice && voicesToUse.some(v => v.name === prev.voice)) ? prev : { ...prev, voice: defaultVoice ? defaultVoice.name : '' });
+              }
+            }
+          };
+
+          loadVoices();
+          if (typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.onvoiceschanged = loadVoices;
+          }
+        }, []);
+
+        const speakWord = useCallback((text, spell = false) => {
+          if (!window.speechSynthesis) return;
+          window.speechSynthesis.cancel();
+          let utterance;
+          if (spell) {
+            const spelled = text.toUpperCase().split('').join(', ') + '. ' + text + '.';
+            utterance = new SpeechSynthesisUtterance(spelled);
+          } else {
+            utterance = new SpeechSynthesisUtterance(text);
+          }
+          utterance.lang = 'en-US';
+          const match = voices.find(v => v.name === settings.voice);
+          if (match) {
+            utterance.voice = match;
+          }
+          utterance.rate = settings.rate;
+          utterance.pitch = settings.pitch;
+          window.speechSynthesis.speak(utterance);
+        }, [voices, settings]);
+
+        const processWord = useCallback(async (wordId) => {
+          setWords(prev => prev.map(w => w.id === wordId ? { ...w, status: WordStatus.PROCESSING } : w));
+          const word = wordsRef.current.find(w => w.id === wordId);
+          if (!word) return;
+
+          try {
+            const phoneticPromise = getPhonetic(word.text);
+            const sentencePromise = settings.dictationMode ? getSentence(word.text) : Promise.resolve(null);
+            const imagePromise = settings.generateImages || !word.imageUrl ? getImage(word.text) : Promise.resolve(word.imageUrl);
+
+            const [phonetic, sentence, imageUrl] = await Promise.all([phoneticPromise, sentencePromise, imagePromise]);
+
+            setWords(prev => prev.map(w => w.id === wordId ? {
+              ...w,
+              status: WordStatus.COMPLETED,
+              phonetic,
+              sentence,
+              imageUrl,
+              audioUrl: w.audioUrl || null,
+              audioData: w.audioData || null,
+              error: null,
+            } : w));
+          } catch (error) {
+            console.error(error);
+            setWords(prev => prev.map(w => w.id === wordId ? {
+              ...w,
+              status: WordStatus.FAILED,
+              error: error.message || 'An unknown error occurred',
+            } : w));
+          }
+        }, [settings.dictationMode, settings.generateImages]);
+
+        const handleGenerate = async (wordIds) => {
+          if (isGenerating) {
+            addToast("A generation process is already running.", "info");
+            return;
+          }
+          setIsGenerating(true);
+          addToast(`Starting generation for ${wordIds.length} word(s)...`, "info");
+
+          await Promise.all(wordIds.map(id => processWord(id)));
+          setIsGenerating(false);
+
+          setWords(currentWords => {
+            const failedCount = currentWords.filter(w => wordIds.includes(w.id) && w.status === WordStatus.FAILED).length;
+            if (failedCount > 0) {
+              addToast(`${failedCount} word(s) failed to generate.`, "error");
+              playSound('error');
+            } else {
+              addToast("All words generated successfully!", "success");
+              playSound('success');
+            }
+            return currentWords;
+          });
+        };
+
+        const handleAddWords = (newWords) => {
+          const wordObjects = newWords
+            .filter(w => w.trim() !== '')
+            .map(w => ({
+              id: generateUniqueId(w.trim()),
+              text: w.trim(),
+              status: WordStatus.PENDING,
+              phonetic: null,
+              sentence: null,
+              imageUrl: null,
+              audioUrl: null,
+              audioData: null,
+              error: null,
+            }));
+          setWords(prev => [...prev, ...wordObjects]);
+          addToast(`${wordObjects.length} words added.`, 'success');
+        };
+
+        const handleFileLoad = async (file) => {
+          try {
+            addToast(`Parsing ${file.name}...`, 'info');
+            if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+              const parsedWords = await parseDocx(file);
+              handleAddWords(parsedWords);
+            } else if (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+              const parsedWords = await parseXlsx(file);
+              handleAddWords(parsedWords);
+            } else if (file.type === 'application/pdf') {
+              const newWords = await parsePdf(file);
+              setWords(prev => [...prev, ...newWords]);
+              addToast(`${newWords.length} words and images added from PDF.`, 'success');
+            } else if (file.type === 'application/zip') {
+              const result = await parseZip(file, words.map(w => w.text));
+              result.matched.forEach(({ text, audioBlob }) => {
+                const audioUrl = URL.createObjectURL(audioBlob);
+                setWords(prev => prev.map(w => w.text.toLowerCase() === text.toLowerCase() ? {
+                  ...w,
+                  audioUrl,
+                  audioData: audioBlob,
+                  status: WordStatus.COMPLETED,
+                } : w));
+              });
+              addToast(`Matched ${result.matched.length} audio files from ZIP.`, 'success');
+            }
+          } catch (error) {
+            addToast(`Failed to parse ${file.name}: ${error.message}`, 'error');
+          }
+        };
+
+        const handleDownload = () => {
+          downloadZip(words, settings.courseName);
+          playSound('download');
+          addToast(`Downloading ${settings.courseName}.zip`, 'success');
+        };
+
+        return (
+          <div className="min-h-screen font-sans">
+            <header className="bg-white dark:bg-gray-800 shadow-md p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center space-x-3 sm:space-x-4">
+                {logo ? (
+                  <img src={logo} alt="Logo" className="h-8 sm:h-10 w-auto" />
+                ) : (
+                  <div className="text-xl sm:text-2xl font-black text-indigo-600">🐝</div>
+                )}
+                <div>
+                  <h1 className="text-lg sm:text-xl font-bold text-gray-800 dark:text-white">{settings.courseName}</h1>
+                  <h2 className="text-xs sm:text-sm font-semibold text-gray-500 dark:text-gray-400">Spelling Bee Helper</h2>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 sm:space-x-3">
+                <button
+                  onClick={() => setGameMode('wheel')}
+                  disabled={words.filter(w => w.status !== WordStatus.FAILED).length === 0}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-green-500 text-white rounded-md font-semibold hover:bg-green-600 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-1 sm:space-x-2 text-xs sm:text-sm"
+                >
+                  <PlayIcon className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <span>Play Wheel</span>
+                </button>
+                <button
+                  onClick={() => setGameMode('unit2')}
+                  disabled={words.filter(w => w.status !== WordStatus.FAILED).length === 0}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-md font-extrabold transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-1 sm:space-x-2 text-xs sm:text-sm shadow"
+                  title="Listening & Choose Picture Quiz"
+                >
+                  <span>🎧</span>
+                  <span>Unit 2: Quiz</span>
+                </button>
+                <button
+                  onClick={handleDownload}
+                  disabled={words.filter(w => w.status === WordStatus.COMPLETED).length === 0}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-sky-500 text-white rounded-md font-semibold hover:bg-sky-600 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-1 sm:space-x-2 text-xs sm:text-sm"
+                >
+                  <DownloadIcon className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <span className="hidden xs:inline">Download ZIP</span>
+                  <span className="xs:hidden">ZIP</span>
+                </button>
+              </div>
+            </header>
+
+            <div className="max-w-7xl mx-auto w-full">
+              <MainContent
+                words={words}
+                onAddWords={handleAddWords}
+                onFileLoad={handleFileLoad}
+                onGenerate={handleGenerate}
+                onDeleteWord={(id) => setWords(prev => prev.filter(w => w.id !== id))}
+                onRegenerateWord={(id) => handleGenerate([id])}
+                onOpenSpellingBee={(w) => {
+                  setWordForSpelling(w);
+                  setGameMode('spell');
+                }}
+                onImageClick={setViewingImage}
+                onSpeak={speakWord}
+                isGenerating={isGenerating}
+              />
+            </div>
+
+            {gameMode === 'wheel' && (
+              <SpinningWheel
+                words={words}
+                onClose={() => setGameMode(null)}
+                background={wheelBackground}
+                logo={logo}
+                onOpenSpellingBee={(w) => {
+                  setWordForSpelling(w);
+                  setGameMode('spell');
+                }}
+                onSpeak={speakWord}
+              />
+            )}
+
+            {gameMode === 'spell' && wordForSpelling && (
+              <SpellingBee
+                word={wordForSpelling}
+                onClose={() => setGameMode(null)}
+                onPronounce={(txt) => speakWord(txt, false)}
+                onSpellOut={(txt) => speakWord(txt, true)}
+              />
+            )}
+
+            {gameMode === 'unit2' && (
+              <Unit2ListeningQuiz
+                words={words}
+                onClose={() => setGameMode(null)}
+                onSpeakWord={(txt) => speakWord(txt, false)}
+              />
+            )}
+
+            {viewingImage && (
+              <div
+                className="fixed inset-0 z-50 bg-black bg-opacity-90 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 cursor-pointer"
+                onClick={() => setViewingImage(null)}
+              >
+                <div className="relative w-full h-full max-w-7xl max-h-[96vh] flex flex-col items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                  <h1 className="font-bubble text-3xl sm:text-5xl font-black tracking-widest text-white mb-3 drop-shadow-lg">
+                    FOOTPRINTS
+                  </h1>
+                  {(typeof viewingImage === 'object' ? viewingImage.imageUrl : viewingImage) ? (
+                    <img 
+                      src={typeof viewingImage === 'object' ? viewingImage.imageUrl : viewingImage} 
+                      alt="Word" 
+                      onClick={() => {
+                        const wordObj = typeof viewingImage === 'object' ? viewingImage : null;
+                        if (wordObj && wordObj.audioUrl) {
+                          const audio = new Audio(wordObj.audioUrl);
+                          audio.play();
+                        } else if (wordObj) {
+                          speakWord(wordObj.text);
+                        }
+                      }}
+                      className="w-full h-full max-w-full max-h-[85vh] sm:max-h-[90vh] rounded-2xl cursor-pointer hover:opacity-95 transition transform hover:scale-[1.01] object-contain" 
+                      title="Tap to listen"
+                    />
+                  ) : (
+                    <div
+                      onClick={() => {
+                        const wordObj = typeof viewingImage === 'object' ? viewingImage : null;
+                        if (wordObj && wordObj.audioUrl) {
+                          const audio = new Audio(wordObj.audioUrl);
+                          audio.play();
+                        } else if (wordObj) {
+                          speakWord(wordObj.text);
+                        }
+                      }}
+                      className="bg-indigo-600 text-white font-black text-5xl sm:text-7xl px-16 py-20 rounded-3xl shadow-2xl cursor-pointer hover:scale-105 transition transform text-center max-w-3xl break-words"
+                      title="Tap to listen"
+                    >
+                      {typeof viewingImage === 'object' ? viewingImage.text : ''}
+                    </div>
+                  )}
+                  {typeof viewingImage === 'object' && viewingImage.text && (
+                    <p 
+                      onClick={() => {
+                        if (viewingImage.audioUrl) {
+                          const audio = new Audio(viewingImage.audioUrl);
+                          audio.play();
+                        } else {
+                          speakWord(viewingImage.text);
+                        }
+                      }}
+                      className="text-white text-2xl font-bold mt-4 bg-black/60 px-6 py-2 rounded-full border border-white/20 cursor-pointer hover:underline"
+                    >
+                      🔊 {viewingImage.text}
+                    </p>
+                  )}
+                  <button 
+                    onClick={() => setViewingImage(null)}
+                    className="absolute -top-12 right-0 text-white text-3xl font-bold p-2 hover:opacity-75"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <Toast toasts={toasts} setToasts={setToasts} />
+          </div>
+        );
+      };
+
+      ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+  </body>
+</html>
